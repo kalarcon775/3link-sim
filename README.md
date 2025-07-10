@@ -1,5 +1,3 @@
-# 3link-sim
-
 # 3-Link Human Leg Simulation – MATLAB & Simulink
 
 This project models a human leg as a 3-link kinematic and dynamic system using MATLAB and Simulink. It was developed by Kailani Alarcon as part of an Honors Contract for EE 370 (Controls) during the Spring 2025 semester.
