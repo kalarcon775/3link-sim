@@ -1,0 +1,143 @@
+MATLAB Code:
+function ThreeLinkLegSFunc(block)
+    % Level-2 MATLAB S-function for 3-link leg with velocities and torques
+    % Kailani Alarcon EE 370 Controls
+    setup(block);
+end
+
+function setup(block)
+    block.NumInputPorts  = 2;  % Inputs: joint angles and joint velocities
+    block.NumOutputPorts = 4;  % Outputs: x, y, end-effector velocity, torques
+
+    % Joint Angles (3x1)
+    block.InputPort(1).Dimensions = 3;
+    block.InputPort(1).DirectFeedthrough = true;
+
+    % Joint Angular Velocities (3x1)
+    block.InputPort(2).Dimensions        = 3;
+    block.InputPort(2).DirectFeedthrough = true;
+
+    % X Pos
+    block.OutputPort(1).Dimensions = 1;
+
+    % Y Pos
+    block.OutputPort(2).Dimensions = 1;
+
+    % Linear Velocity [vx; vy]
+    block.OutputPort(3).Dimensions = 2;
+
+    % Joint Torques [tau1; tau2; tau3]
+    block.OutputPort(4).Dimensions = 3;
+
+    % Continuous Sample Time
+    block.SampleTimes = [0 0];
+
+    block.SimStateCompliance = 'DefaultSimState';
+
+    block.RegBlockMethod('Outputs', @Outputs);
+end
+
+function Outputs(block)
+    % Lengths
+    L1 = 1.0;  % Thigh
+    L2 = 1.0;  % Shin Calf Thingy
+    L3 = 0.5;  % Foot
+
+    % Masses
+    m1 = 1;
+    m2 = 1;
+    m3 = 0.5;
+
+    % Center of Masses
+    cm1 = L1/2;
+    cm2 = L2/2;
+    cm3 = L3/2;
+
+    % Inertias (unused but kept for extension)
+    I1 = 0.1;
+    I2 = 0.1;
+    I3 = 0.05;
+
+    % Gravity
+    g = 9.81;
+
+    % Joint Angles
+    theta = block.InputPort(1).Data;
+    theta = theta(:);  %STAY A COL VECTOR
+    theta1 = theta(1);
+    theta2 = theta(2);
+    theta3 = theta(3);
+    theta_dot = block.InputPort(2).Data;
+    theta_dot = theta_dot(:);
+    
+    % Extract individual joint velocities
+    theta1_dot = theta_dot(1);
+    theta2_dot = theta_dot(2);
+    theta3_dot = theta_dot(3);
+
+    % Position
+    x = L1*cos(theta1) + L2*cos(theta1 + theta2) + L3*cos(theta1 + theta2 + theta3);
+    y = L1*sin(theta1) + L2*sin(theta1 + theta2) + L3*sin(theta1 + theta2 + theta3);
+
+    % Jacobian Matrix
+    J = [-L1*sin(theta1) - L2*sin(theta1 + theta2) - L3*sin(theta1 + theta2 + theta3), ...
+         -L2*sin(theta1 + theta2) - L3*sin(theta1 + theta2 + theta3), ...
+         -L3*sin(theta1 + theta2 + theta3);
+          L1*cos(theta1) + L2*cos(theta1 + theta2) + L3*cos(theta1 + theta2 + theta3), ...
+          L2*cos(theta1 + theta2) + L3*cos(theta1 + theta2 + theta3), ...
+          L3*cos(theta1 + theta2 + theta3)];
+
+    % Linear velocities
+    v = J * theta_dot;
+    vx = v(1);
+    vy = v(2);
+
+    % Dynamicz
+    M11 = I1 + I2 + I3 + m1*cm1^2 + ...
+          m2*(L1^2 + cm2^2 + 2*L1*cm2*cos(theta2)) + ...
+          m3*(L1^2 + L2^2 + cm3^2 + ...
+              2*L1*L2*cos(theta2) + 2*L1*cm3*cos(theta2+theta3) + ...
+              2*L2*cm3*cos(theta3));
+    M12 = I2 + I3 + m2*(cm2^2 + L1*cm2*cos(theta2)) + ...
+          m3*(L2^2 + cm3^2 + L1*L2*cos(theta2) + ...
+              L1*cm3*cos(theta2+theta3) + L2*cm3*cos(theta3));
+    M13 = I3 + m3*(cm3^2 + L1*cm3*cos(theta2+theta3) + L2*cm3*cos(theta3));
+    M22 = I2 + I3 + m2*cm2^2 + ...
+          m3*(L2^2 + cm3^2 + 2*L2*cm3*cos(theta3));
+    M23 = I3 + m3*(cm3^2 + L2*cm3*cos(theta3));
+    M33 = I3 + m3*cm3^2;
+
+    M = [M11, M12, M13;
+         M12, M22, M23;
+         M13, M23, M33];
+
+    % Coriolis and Centrifugal Forces
+    h = -m2*L1*cm2*sin(theta2) - m3*L1*L2*sin(theta2) - m3*L1*cm3*sin(theta2+theta3);
+    h2 = -m3*L2*cm3*sin(theta3);
+
+    C = [h*(theta2_dot + theta3_dot), h*theta3_dot, 0;
+         -h*theta1_dot, h2*theta3_dot, h2*(theta1_dot + theta2_dot);
+         -h*theta1_dot, -h2*theta2_dot, 0];
+
+    Coriols = C * theta_dot;
+
+    % Gravity Vectors
+    g1 = (m1*cm1 + m2*L1 + m3*L1) * g * cos(theta1) + ...
+         (m2*cm2 + m3*L2) * g * cos(theta1 + theta2) + ...
+         m3*cm3 * g * cos(theta1 + theta2 + theta3);
+    g2 = (m2*cm2 + m3*L2) * g * cos(theta1 + theta2) + ...
+         m3*cm3 * g * cos(theta1 + theta2 + theta3);
+    g3 = m3*cm3 * g * cos(theta1 + theta2 + theta3);
+
+    G = [g1; g2; g3];
+
+    % Final Torque
+    tau = Coriols + G;
+
+    % Set outputs
+    block.OutputPort(1).Data = x;
+    block.OutputPort(2).Data = y;
+    block.OutputPort(3).Data = [vx; vy];
+    block.OutputPort(4).Data = tau;
+end
+
